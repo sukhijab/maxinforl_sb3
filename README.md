@@ -50,10 +50,6 @@ python examples/dmc/experiment.py \
   --domain_name cartpole-swingup_sparse
 ```
 
-
-All hyperparameters are listed in the `examples/state_based//configs.yaml` and `examples/vision_based//configs.yaml` 
-files. You can override them if needed.
-
 [jax]: https://github.com/google/jax#pip-installation-gpu-cuda
 [paper]: https://openreview.net/pdf?id=R4q3cY3kQf
 [website]: https://sukhijab.github.io/
