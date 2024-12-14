@@ -1,0 +1,50 @@
+cartpole-swingup_sparse:
+  features: 256
+  total_steps: 500_000
+  action_repeat: 2
+  train_freq: 1
+
+reacher-hard:
+  features: 256
+  total_steps: 1_000_000
+  action_repeat: 2
+  train_freq: 1
+
+finger-spin:
+  features: 256
+  total_steps: 500_000
+  action_repeat: 2
+  train_freq: 1
+
+hopper-hop:
+  features: 256
+  total_steps: 1_000_000
+  action_repeat: 2
+  train_freq: 1
+
+finger-turn_hard:
+  features: 256
+  total_steps: 1_000_000
+  action_repeat: 2
+  train_freq: 1
+
+walker-run:
+  features: 256
+  total_steps: 1_000_000
+  action_repeat: 2
+  train_freq: 1
+
+cheetah-run:
+  features: 256
+  total_steps: 1_000_000
+  action_repeat: 2
+  train_freq: 1
+
+humanoid-walk:
+  features: 512
+  max_steps: 5_000_000
+  action_repeat: 2
+  train_freq: 1
+
+
+
