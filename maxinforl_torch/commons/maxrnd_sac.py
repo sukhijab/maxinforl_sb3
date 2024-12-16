@@ -7,36 +7,45 @@ from stable_baselines3.sac import SAC
 from typing import Optional, Union, Dict, Type
 import numpy as np
 import torch as th
-from maxinforl.models.ensembles import EnsembleMLP, Normalizer, EPS
+from maxinforl_torch.models.ensembles import EnsembleMLP, Normalizer, dropout_weights_init_
 from stable_baselines3.common.utils import obs_as_tensor
 from stable_baselines3.common.utils import polyak_update
-from maxinforl.commons.utils import DisagreementIntrinsicReward
+from maxinforl_torch.commons.utils import DisagreementIntrinsicReward
 from stable_baselines3.common.type_aliases import MaybeCallback
 
 
-class MaxInfoSAC(SAC):
+class MaxRNDSAC(SAC):
     def __init__(self,
                  ensemble_model_kwargs: Dict,
+                 target_model_kwargs: Dict,
                  ensemble_type: Type[torch.nn.Module] = EnsembleMLP,
                  intrinsic_reward_weights: Optional[Dict] = None,
                  normalize_ensemble_training: bool = True,
-                 pred_diff: bool = True,
-                 learn_rewards: bool = True,
-                 normalize_dynamics_entropy: bool = True,
+                 normalize_intrinsic_reward: bool = True,
                  dyn_entropy_scale: Union[str, float] = 'auto',
                  init_dyn_entropy_scale: float = 1,
+                 squash_target: bool = False,
+                 embedding_dim: int = -1,
+                 model_init_gain: float = np.sqrt(2),
+                 max_grad_norm: float = 0.5,
                  *args,
                  **kwargs
                  ):
         self.dyn_entropy_scale = dyn_entropy_scale
         self.normalize_ensemble_training = normalize_ensemble_training
-        self.normalize_dynamics_entropy = normalize_dynamics_entropy
-        self.pred_diff = pred_diff
+        self.normalize_intrinsic_reward = normalize_intrinsic_reward
         self.init_dyn_entropy_scale = init_dyn_entropy_scale
-        self.learn_rewards = learn_rewards
+        self.squash_target = squash_target
+        self.model_init_gain = model_init_gain
+        self.max_grad_norm = max_grad_norm
         super().__init__(*args, **kwargs)
+        if embedding_dim > 0:
+            self.embedding_dim = embedding_dim
+        else:
+            self.embedding_dim = self.observation_space.shape[0]
         self._setup_ensemble_model(
             ensemble_model_kwargs=ensemble_model_kwargs,
+            target_model_kwargs=target_model_kwargs,
             intrinsic_reward_weights=intrinsic_reward_weights,
             device=self.device,
             agg_intrinsic_reward='mean',
@@ -68,11 +77,12 @@ class MaxInfoSAC(SAC):
             output_normalizers[key] = Normalizer(input_dim=val.shape[-1], update=self.normalize_ensemble_training,
                                                  device=device)
         self.output_normalizers = output_normalizers
-        self.entropy_normalizer = Normalizer(input_dim=1, update=self.normalize_dynamics_entropy,
+        self.intrinsic_reward_normalizer = Normalizer(input_dim=1, update=self.normalize_intrinsic_reward,
                                              device=device)
 
     def _setup_ensemble_model(self,
                               ensemble_model_kwargs: Dict,
+                              target_model_kwargs: Dict,
                               intrinsic_reward_weights: Dict,
                               device: th.device,
                               agg_intrinsic_reward: str = 'mean',
@@ -88,20 +98,36 @@ class MaxInfoSAC(SAC):
             obs_as_tensor(sample_obs,
                           self.device)
         )
+
+        # define a target model for generating random labels
         input_dim = dummy_feat.shape[-1] + self.action_space.shape[0]
-        output_dict = self._get_ensemble_targets(sample_obs,
-                                                 sample_obs,
-                                                 rewards=torch.zeros((1, 1))
-                                                 )
+        output_dict = {
+            'out': torch.zeros(1, self.embedding_dim),
+        }
+
+        self.target_model = ensemble_type(
+            input_dim=input_dim,
+            output_dict=output_dict,
+            use_entropy=False,
+            num_heads=1,
+            **target_model_kwargs,
+        )
+        self.target_model.apply(lambda m: dropout_weights_init_(m, gain=self.model_init_gain))
+        self.target_model.to(device)
+        self.target_model.eval()
+        for p in self.target_model.parameters():
+            p.requires_grad = False
 
         self.ensemble_model = ensemble_type(
             input_dim=input_dim,
             output_dict=output_dict,
-            use_entropy=True,
+            use_entropy=False,
+            num_heads=5,
             **ensemble_model_kwargs,
         )
-
+        self.ensemble_model.apply(lambda m: dropout_weights_init_(m, gain=self.model_init_gain))
         self.ensemble_model.to(device)
+
         self._setup_normalizer(input_dim=input_dim, output_dict=output_dict, device=device)
 
         if intrinsic_reward_weights is not None:
@@ -109,6 +135,7 @@ class MaxInfoSAC(SAC):
         else:
             intrinsic_reward_weights = {k: 1.0 for k in output_dict.keys()}
 
+        # use model error as the intrinsic reward
         self.intrinsic_reward_model = DisagreementIntrinsicReward(
             intrinsic_reward_weights=intrinsic_reward_weights,
             ensemble_model=self.ensemble_model,
@@ -121,46 +148,24 @@ class MaxInfoSAC(SAC):
                 obs, features_extractor=self.actor.features_extractor)
         return features
 
-    def _get_ensemble_targets(self, next_obs: Union[th.Tensor, Dict], obs: Union[th.Tensor, Dict],
-                              rewards: th.Tensor) -> Dict:
-        if self.pred_diff:
-            assert type(next_obs) == type(obs)
-            if isinstance(next_obs, np.ndarray) or isinstance(next_obs, dict):
-                next_obs = obs_as_tensor(next_obs, self.device)
-                obs = obs_as_tensor(obs, self.device)
-            next_obs = self.extract_features(next_obs)
-            obs = self.extract_features(obs)
-            if self.learn_rewards:
-                return {
-                    'next_obs': next_obs - obs,
-                    'reward': rewards,
-                }
-            else:
-                return {
-                    'next_obs': next_obs - obs,
-                }
+    def _get_ensemble_targets(self, inp: torch.Tensor) -> Dict:
+        out = self.target_model(inp)
+        # put the output between -1 and 1 for normalizing
+        if self.squash_target:
+            out = {k: F.tanh(v.reshape(-1, self.embedding_dim)) for k, v in out.items()}
         else:
-            if isinstance(next_obs, np.ndarray) or isinstance(next_obs, dict):
-                next_obs = obs_as_tensor(next_obs, self.device)
-            next_obs = self.extract_features(next_obs)
-            if self.learn_rewards:
-                return {
-                    'next_obs': next_obs,
-                    'reward': rewards,
-                }
-            else:
-                return {
-                    'next_obs': next_obs,
-                }
+            out = {k: v.reshape(-1, self.embedding_dim) for k, v in out.items()}
+        return out
 
-    def get_intrinsic_reward(self, inp: th.Tensor, labels: Dict) -> th.Tensor:
+    def get_intrinsic_reward(self, inp: th.Tensor) -> th.Tensor:
         # calculate intrinsic reward
-        entropy = self.intrinsic_reward_model(inp=inp, labels=labels)
-        if not self.ensemble_model.learn_std:
-            info_gain = entropy - torch.log(torch.ones_like(entropy) * EPS)
-            return info_gain
-        else:
-            return entropy
+        labels = self._get_ensemble_targets(inp)
+        for key, y in labels.items():
+            # if gradient_step == normalization_index:
+            #    self.output_normalizers[key].update(y)
+            labels[key] = self.output_normalizers[key].normalize(y)
+        int_reward = self.intrinsic_reward_model(inp=inp, labels=labels)
+        return int_reward
 
     def train(self, gradient_steps: int, batch_size: int = 64) -> None:
         # Switch to train mode (this affects batch norm / dropout)
@@ -179,7 +184,7 @@ class MaxInfoSAC(SAC):
         dyn_scale_losses, dyn_scales = [], []
         actor_losses, critic_losses = [], []
 
-        dynamics_info_gain, target_info_gain = [], []
+        intrinsic_rewards, target_intrinsic_rewards = [], []
 
         ensemble_losses = collections.defaultdict(list)
 
@@ -205,18 +210,18 @@ class MaxInfoSAC(SAC):
 
             total_inp = th.cat([inp, target_inp], dim=0)
             total_inp = self.input_normalizer.normalize(total_inp)
-            dynamics_entropy = self.get_intrinsic_reward(
-                inp=total_inp,
-                labels=None,
-            ).reshape(-1, 1)
-            self.entropy_normalizer.update(dynamics_entropy.detach())
-            dynamics_entropy = self.entropy_normalizer.normalize(dynamics_entropy)
 
-            dynamics_entropy, target_dynamics_entropy = dynamics_entropy[:batch_size], \
-                dynamics_entropy[batch_size:]
+            int_reward = self.get_intrinsic_reward(
+                inp=total_inp,
+            ).reshape(-1, 1)
+            self.intrinsic_reward_normalizer.update(int_reward.detach())
+            int_reward = self.intrinsic_reward_normalizer.normalize(int_reward)
+
+            int_reward, target_int_reward = int_reward[:batch_size], \
+                int_reward[batch_size:]
             # get target for entropy
-            dynamics_info_gain.append(dynamics_entropy.mean().detach().item())
-            target_info_gain.append(target_dynamics_entropy.mean().item())
+            intrinsic_rewards.append(int_reward.mean().detach().item())
+            target_intrinsic_rewards.append(target_int_reward.mean().item())
             ent_coef_loss = None
             if self.ent_coef_optimizer is not None and self.log_ent_coef is not None:
                 # Important: detach the variable from the graph
@@ -232,7 +237,7 @@ class MaxInfoSAC(SAC):
             if self.dyn_ent_scale_optimizer is not None and self.log_dyn_entropy_scale is not None:
                 dyn_scale = th.exp(self.log_dyn_entropy_scale.detach())
                 dyn_scale_loss = (self.log_dyn_entropy_scale * (
-                        dynamics_entropy - target_dynamics_entropy).detach()).mean()
+                        int_reward - target_int_reward).detach()).mean()
                 dyn_scale_losses.append(dyn_scale_loss.item())
             else:
                 dyn_scale = self.dyn_entropy_scale
@@ -240,17 +245,19 @@ class MaxInfoSAC(SAC):
             ent_coefs.append(ent_coef.item())
             dyn_scales.append(dyn_scale.item())
 
-            total_entropy = dyn_scale * dynamics_entropy - ent_coef * log_prob
+            total_exploration_bonus = dyn_scale * int_reward - ent_coef * log_prob
             # Optimize entropy coefficient, also called
             # entropy temperature or alpha in the paper
             if ent_coef_loss is not None and self.ent_coef_optimizer is not None:
                 self.ent_coef_optimizer.zero_grad()
                 ent_coef_loss.backward()
+                # th.nn.utils.clip_grad_norm_(self.log_ent_coef, self.max_grad_norm)
                 self.ent_coef_optimizer.step()
 
             if dyn_scale_loss is not None and self.dyn_ent_scale_optimizer is not None:
                 self.dyn_ent_scale_optimizer.zero_grad()
                 dyn_scale_loss.backward()
+                th.nn.utils.clip_grad_norm_(self.log_dyn_entropy_scale, self.max_grad_norm)
                 self.dyn_ent_scale_optimizer.step()
 
             with th.no_grad():
@@ -263,15 +270,13 @@ class MaxInfoSAC(SAC):
                 # get entropy of transitions
                 inp = th.cat([next_features, next_actions], dim=-1)
                 inp = self.input_normalizer.normalize(inp)
-                next_obs_dynamics_entropy = self.get_intrinsic_reward(
+                next_obs_int_reward = self.get_intrinsic_reward(
                     inp=inp,
-                    labels=None,
                 ).reshape(-1, 1)
-                next_obs_dynamics_entropy = self.entropy_normalizer.normalize(next_obs_dynamics_entropy)
-                next_state_entropy = dyn_scale * next_obs_dynamics_entropy \
-                                     - ent_coef * next_log_prob.reshape(-1, 1)
+                next_obs_int_reward = self.intrinsic_reward_normalizer.normalize(next_obs_int_reward)
+                next_state_exploration_bonus = dyn_scale * next_obs_int_reward - ent_coef * next_log_prob.reshape(-1, 1)
                 # add entropy term
-                next_q_values = next_q_values + next_state_entropy
+                next_q_values = next_q_values + next_state_exploration_bonus
                 # td error + entropy term
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
@@ -287,6 +292,7 @@ class MaxInfoSAC(SAC):
             # Optimize the critic
             self.critic.optimizer.zero_grad()
             critic_loss.backward()
+            # th.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
             self.critic.optimizer.step()
 
             # Compute actor loss
@@ -295,12 +301,13 @@ class MaxInfoSAC(SAC):
             q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
 
             min_qf_pi, _ = th.min(q_values_pi, dim=1, keepdim=True)
-            actor_loss = -(total_entropy + min_qf_pi).mean()
+            actor_loss = -(total_exploration_bonus + min_qf_pi).mean()
             actor_losses.append(actor_loss.item())
 
             # Optimize the actor
             self.actor.optimizer.zero_grad()
             actor_loss.backward()
+            # th.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
             self.actor.optimizer.step()
 
             # Update target networks
@@ -313,9 +320,7 @@ class MaxInfoSAC(SAC):
             # ensemble model training
             inp = th.cat([features, replay_data.actions], dim=-1)
             inp = self.input_normalizer.normalize(inp)
-
-            labels = self._get_ensemble_targets(replay_data.next_observations, replay_data.observations,
-                                                replay_data.rewards)
+            labels = self._get_ensemble_targets(inp)
             for key, y in labels.items():
                 # if gradient_step == normalization_index:
                 #    self.output_normalizers[key].update(y)
@@ -350,8 +355,10 @@ class MaxInfoSAC(SAC):
                 self.output_normalizers[key].std.cpu().numpy()))
         self.logger.record(f"train/inp_normalizer_mean", np.mean(self.input_normalizer.mean.cpu().numpy()))
         self.logger.record(f"train/inp_normalizer_std", np.mean(self.input_normalizer.std.cpu().numpy()))
-        self.logger.record("train/dynamics_info_gain", np.mean(dynamics_info_gain))
-        self.logger.record("train/target_info_gain", np.mean(target_info_gain))
+        self.logger.record(f"train/int_reward_mean", np.mean(self.intrinsic_reward_normalizer.mean.cpu().numpy()))
+        self.logger.record(f"train/int_reward_std", np.mean(self.intrinsic_reward_normalizer.std.cpu().numpy()))
+        self.logger.record("train/intrinsic_reward", np.mean(intrinsic_rewards))
+        self.logger.record("train/target_intrinsic_reward", np.mean(target_intrinsic_rewards))
         if len(ent_coef_losses) > 0:
             self.logger.record("train/ent_coef_loss", np.mean(ent_coef_losses))
         if len(dyn_scale_losses) > 0:
@@ -363,9 +370,8 @@ class MaxInfoSAC(SAC):
             features = self.extract_features(replay_data.observations)
             inp = th.cat([features, replay_data.actions], dim=-1)
             self.input_normalizer.update(inp)
-
-            labels = self._get_ensemble_targets(replay_data.next_observations, replay_data.observations,
-                                                replay_data.rewards)
+            inp = self.input_normalizer.normalize(inp)
+            labels = self._get_ensemble_targets(inp=inp)
             for key, y in labels.items():
                 self.output_normalizers[key].update(y)
 
@@ -374,7 +380,7 @@ class MaxInfoSAC(SAC):
             total_timesteps: int,
             callback: MaybeCallback = None,
             log_interval: int = 4,
-            tb_log_name: str = "MaxInfoSac",
+            tb_log_name: str = "MaxRNDSac",
             reset_num_timesteps: bool = True,
             progress_bar: bool = False,
     ):

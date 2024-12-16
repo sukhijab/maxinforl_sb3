@@ -10,7 +10,7 @@ required = [
 
 extras = {}
 setup(
-    name='maxinforl',
+    name='maxinforl_torch',
     version='0.0.1',
     license="MIT",
     packages=find_packages(),

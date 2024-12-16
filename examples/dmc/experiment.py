@@ -4,8 +4,8 @@ from gymnasium.wrappers.common import TimeLimit
 import wandb
 from stable_baselines3.sac import SAC
 from wandb.integration.sb3 import WandbCallback
-from maxinforl.commons import MaxInfoEpsGreedy, MaxInfoSAC, MaxRNDSAC, OACPolicy
-from maxinforl.commons.utils import DisagreementIntrinsicReward, random_exploration_schedule
+from maxinforl_torch.commons import MaxInfoEpsGreedy, MaxInfoSAC, MaxRNDSAC, OACPolicy
+from maxinforl_torch.commons.utils import DisagreementIntrinsicReward, random_exploration_schedule
 import numpy as np
 import argparse
 import yaml
@@ -27,9 +27,9 @@ def experiment(
         features: int = 256,
 ):
     env_name, task = domain_name.split('-')
-    from maxinforl.envs.dm2gym import DMCGym
-    from maxinforl.envs.action_repeat import ActionRepeat
-    from maxinforl.envs.action_cost import ActionCost
+    from maxinforl_torch.envs.dm2gym import DMCGym
+    from maxinforl_torch.envs.action_repeat import ActionRepeat
+    from maxinforl_torch.envs.action_cost import ActionCost
     tb_dir = logs_dir + 'runs'
 
     config = dict(

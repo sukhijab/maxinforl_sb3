@@ -8,7 +8,7 @@ from typing import Optional, Union, Dict, Type, Tuple
 from gymnasium import spaces
 import numpy as np
 import torch as th
-from maxinforl.models.ensembles import EnsembleMLP, Normalizer
+from maxinforl_torch.models.ensembles import EnsembleMLP, Normalizer
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.type_aliases import Schedule, RolloutReturn, \
     TrainFreq, MaybeCallback, TrainFrequencyUnit
@@ -16,7 +16,7 @@ from stable_baselines3.common.utils import obs_as_tensor, should_collect_more_st
 from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.vec_env import VecEnv
 from stable_baselines3.common.utils import get_schedule_fn, polyak_update
-from maxinforl.commons.utils import BaseIntrinsicReward
+from maxinforl_torch.commons.utils import BaseIntrinsicReward
 from stable_baselines3.common.noise import ActionNoise
 
 
