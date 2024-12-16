@@ -99,17 +99,6 @@ def experiment(
             **algorithm_kwargs
         )
 
-    elif alg == 'maxinfooac':
-        algorithm_kwargs['policy'] = OACPolicy
-        algorithm_kwargs['policy_kwargs'] = {'beta_lb': -3.65,
-                                'beta_ub': 1.0, 'shift_multiplier': 2.0}
-
-        algorithm = SAC(
-            env=vec_env,
-            seed=seed,
-            **algorithm_kwargs
-        )
-
     elif alg == 'maxinfo_eps_greedy':
 
         ensemble_model_kwargs = {
@@ -137,6 +126,22 @@ def experiment(
             'optimizer_kwargs': {'lr': 3e-4, 'weight_decay': 0.0},
             'features': (features, features),
         }
+        algorithm = MaxInfoSAC(
+            env=vec_env,
+            seed=seed,
+            ensemble_model_kwargs=ensemble_model_kwargs,
+            **algorithm_kwargs
+        )
+    elif alg == 'maxinfooac':
+        algorithm_kwargs['policy'] = OACPolicy
+        algorithm_kwargs['policy_kwargs'] = {'beta_lb': -3.65,
+                                'beta_ub': 1.0, 'shift_multiplier': 2.0}
+        ensemble_model_kwargs = {
+            'learn_std': False,
+            'optimizer_kwargs': {'lr': 3e-4, 'weight_decay': 0.0},
+            'features': (features, features),
+        }
+
         algorithm = MaxInfoSAC(
             env=vec_env,
             seed=seed,

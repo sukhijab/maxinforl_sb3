@@ -29,7 +29,8 @@ exploration bonuses derived from information gain of the underlying MDP.
 MaxInfoRL naturally trades off maximization of the value function with that of the entropy over states, rewards,
 and actions. MaxInfoRL is very general and can be combined with a variety
 of off-policy model-free RL methods for continuous state-action spaces. We provide implementations of 
-**MaxInfoSac, MaxRNDSAC, MaxInfoOAC, $\epsilon$--MaxInfoRL**.
+**MaxInfoSac, MaxRNDSAC, MaxInfoOAC, $\epsilon$--MaxInfoRL**. 
+Our implementations build up on the stable-baselines3 package.
 
 
 
@@ -50,7 +51,8 @@ python examples/dmc/experiment.py \
   --domain_name cartpole-swingup_sparse
 ```
 
-[jax]: https://github.com/google/jax#pip-installation-gpu-cuda
+You can run sac, oac, maxinfosac, maxinfooac, maxrndsac, or maxinfo_eps_greedy by specifying the alg flag.
+
 [paper]: https://openreview.net/pdf?id=R4q3cY3kQf
 [website]: https://sukhijab.github.io/
 [tweet]: https://sukhijab.github.io/
