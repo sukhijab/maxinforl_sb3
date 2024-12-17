@@ -1,20 +1,6 @@
 # MaxInfoRL: Boosting exploration in RL through information gain maximization
 
-An implementation of [MaxInfoRL][paper], a simple, flexible, and scalable reinforcement
-learning algorithm that enhances exploration in RL by automatically combining intrinsic and extrinsic rewards.
-
-
-
-If you find this code useful, please reference in your paper:
-
-```
-@article{sukhija2024maxinforl,
-  title={MaxInfoRL: Boosting exploration in reinforcement learning through information gain maximization},
-  author={Sukhija, Bhavya and Coros, Stelian and Krause, Andreas and Abbeel, Pieter and Sferrazza, Carmelo},
-  journal={ArXiv},
-  year={2024}
-}
-```
+A Pytorch implementation of [MaxInfoRL][paper], a simple, flexible, and scalable class of reinforcement learning algorithms that enhance exploration in RL by automatically combining intrinsic and extrinsic rewards. For a jax implementation, visit this [jax repository][jaxrepo].
 
 To learn more:
 
@@ -32,8 +18,6 @@ of off-policy model-free RL methods for continuous state-action spaces. We provi
 **MaxInfoSac, MaxRNDSAC, MaxInfoOAC, $\epsilon$--MaxInfoRL**. 
 Our implementations build up on the stable-baselines3 package.
 
-
-
 # Instructions
 
 ## Installation
@@ -41,6 +25,8 @@ Our implementations build up on the stable-baselines3 package.
 ```sh
 pip install -e .
 ```
+
+## Training
 
 Training script:
 
@@ -53,6 +39,26 @@ python examples/dmc/experiment.py \
 
 You can run sac, oac, maxinfosac, maxinfooac, maxrndsac, or maxinfo_eps_greedy by specifying the alg flag.
 
-[paper]: https://openreview.net/pdf?id=R4q3cY3kQf
-[website]: https://sukhijab.github.io/
+[paper]: https://arxiv.org/abs/2412.12098
+[website]: https://sukhijab.github.io/projects/maxinforl/
 [tweet]: https://sukhijab.github.io/
+[jaxrepo]: https://github.com/sukhijab/maxinforl_jax
+
+## Custom environments
+
+This repo relies on stable-baselines3 to load environments, natively supporting Gym environments. If your environment is registered in Gym, you can directly use it (just adjust the configs.yaml file accordingly). 
+
+# Citation
+If you find MaxInfoRL useful for your research, please cite this work:
+```
+@article{sukhija2024maxinforl,
+  title={MaxInfoRL: Boosting exploration in reinforcement learning through information gain maximization},
+  author={Sukhija, Bhavya and Coros, Stelian and Krause, Andreas and Abbeel, Pieter and Sferrazza, Carmelo},
+  journal={ArXiv},
+  year={2024}
+}
+```
+
+# References
+This codebase contains some files adapted from other sources:
+* Stable-Baselines3: https://github.com/DLR-RM/stable-baselines3
