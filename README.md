@@ -54,7 +54,7 @@ If you find MaxInfoRL useful for your research, please cite this work:
 @article{sukhija2024maxinforl,
   title={MaxInfoRL: Boosting exploration in reinforcement learning through information gain maximization},
   author={Sukhija, Bhavya and Coros, Stelian and Krause, Andreas and Abbeel, Pieter and Sferrazza, Carmelo},
-  journal={{arXiv preprint arXiv:2412.12098}},
+  journal={arXiv preprint arXiv:2412.12098},
   year={2024}
 }
 ```
